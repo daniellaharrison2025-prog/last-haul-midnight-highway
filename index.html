@@ -1,0 +1,275 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last Haul: Midnight Highway</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080c14;color:white;font-family:Arial,sans-serif}
+header{padding:15px;background:#171e2c;text-align:center}
+h1{font-size:23px;margin:5px}
+main{max-width:1000px;margin:auto;padding:12px}
+canvas{width:100%;display:block;border:2px solid #35445b;border-radius:10px;background:#080c14}
+.hud{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+.stat{flex:1;min-width:110px;background:#1a2638;padding:12px;border-radius:8px}
+.stat b{display:block;color:#7fe5df;font-size:21px;margin-top:5px}
+#message{background:#20283a;padding:14px;border-left:4px solid #b05d77;border-radius:5px;min-height:50px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:15px 0}
+button{padding:14px;background:#304a68;color:white;border:1px solid #7692af;border-radius:9px;font-weight:bold;touch-action:none}
+button:active{background:#597c9d}
+p{color:#c5ccda;line-height:1.5}
+</style>
+</head>
+<body>
+<header>
+<h1>🚛 LAST HAUL: MIDNIGHT HIGHWAY</h1>
+<div>Route 13 • Midnight Delivery • Prototype 0.1</div>
+</header>
+<main>
+<canvas id="game" width="960" height="540"></canvas>
+<div class="hud">
+<div class="stat">SPEED<b id="speed">0 MPH</b></div>
+<div class="stat">FUEL<b id="fuel">100%</b></div>
+<div class="stat">DISTANCE<b id="distance">8.0 MI</b></div>
+<div class="stat">TRUCK CONDITION<b id="health">100%</b></div>
+</div>
+<div id="message">DISPATCH: Deliver your cargo. Stay on the road.</div>
+<div class="controls">
+<button data-control="left">◀ LEFT</button>
+<button data-control="gas">▲ GAS</button>
+<button data-control="brake">▼ BRAKE</button>
+<button data-control="right">RIGHT ▶</button>
+<button id="lights">LIGHTS ON</button>
+<button id="restart">RESTART</button>
+</div>
+<p>MacBook: Arrow keys or WASD. Z Fold: Hold the touch buttons. Reach the depot without running out of fuel or damaging your truck.</p>
+</main>
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const $=id=>document.getElementById(id);
+const keys=new Set();
+let truck,finished,warning,last=0;
+
+function reset(){
+ truck={speed:0,fuel:100,health:100,distance:8,
+ lane:0,road:0,time:0,lights:true};
+ finished=false;
+ warning=false;
+ keys.clear();
+ $("message").textContent="DISPATCH: Deliver your cargo. Stay on the road.";
+ $("lights").textContent="LIGHTS ON";
+}
+reset();
+
+const mapping={
+ ArrowLeft:"left",a:"left",A:"left",
+ ArrowRight:"right",d:"right",D:"right",
+ ArrowUp:"gas",w:"gas",W:"gas",
+ ArrowDown:"brake",s:"brake",S:"brake"
+};
+
+window.addEventListener("keydown",e=>{
+ if(mapping[e.key]){
+  e.preventDefault();
+  keys.add(mapping[e.key]);
+ }
+});
+window.addEventListener("keyup",e=>{
+ if(mapping[e.key])keys.delete(mapping[e.key]);
+});
+window.addEventListener("blur",()=>keys.clear());
+
+document.querySelectorAll("[data-control]").forEach(btn=>{
+ const control=btn.dataset.control;
+ btn.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  btn.setPointerCapture(e.pointerId);
+  keys.add(control);
+ });
+ ["pointerup","pointercancel","lostpointercapture"].forEach(event=>{
+  btn.addEventListener(event,()=>keys.delete(control));
+ });
+});
+
+$("restart").onclick=reset;
+$("lights").onclick=()=>{
+ truck.lights=!truck.lights;
+ $("lights").textContent=truck.lights?"LIGHTS ON":"LIGHTS OFF";
+};
+
+function end(message){
+ finished=true;
+ truck.speed=0;
+ $("message").textContent=message;
+}
+
+function update(dt){
+ if(finished)return;
+ const t=truck;
+ t.time+=dt;
+ if(keys.has("gas"))t.speed+=28*dt;
+ else t.speed-=8*dt;
+ if(keys.has("brake"))t.speed-=55*dt;
+ t.speed=Math.max(0,Math.min(70,t.speed));
+
+ const steer=(keys.has("right")?1:0)-(keys.has("left")?1:0);
+ t.lane+=steer*dt*(0.35+t.speed/110);
+ t.lane=Math.max(-2,Math.min(2,t.lane));
+
+ if(Math.abs(t.lane)>0.91&&t.speed>12){
+  t.health-=dt*(2+t.speed*0.19);
+  t.speed=Math.max(0,t.speed-20*dt);
+ }
+ t.fuel-=dt*(t.speed*0.005+(t.lights?0.003:0));
+ t.distance-=t.speed*dt/3600*9;
+ t.road+=t.speed*dt*0.012;
+
+ if(t.distance<4.3&&!warning){
+  warning=true;
+  $("message").textContent=
+  'RADIO STATIC: "You missed the exit." Strange headlights appear ahead.';
+ }
+ if(t.distance<=0){
+  end("DELIVERY COMPLETE! But who was following you?");
+ }else if(t.fuel<=0){
+  end("OUT OF FUEL. Footsteps approach your truck...");
+ }else if(t.health<=0){
+  end("TRUCK DISABLED. Something moves in the darkness...");
+ }
+
+ $("speed").textContent=Math.round(t.speed)+" MPH";
+ $("fuel").textContent=Math.max(0,Math.round(t.fuel))+"%";
+ $("distance").textContent=Math.max(0,t.distance).toFixed(1)+" MI";
+ $("health").textContent=Math.max(0,Math.round(t.health))+"%";
+}
+
+function draw(){
+ const w=canvas.width,h=canvas.height,t=truck;
+ const sky=ctx.createLinearGradient(0,0,0,h);
+ sky.addColorStop(0,"#050914");
+ sky.addColorStop(0.6,"#182235");
+ sky.addColorStop(1,"#070b0f");
+ ctx.fillStyle=sky;
+ ctx.fillRect(0,0,w,h);
+
+ // Stars
+ for(let i=0;i<55;i++){
+  const x=(i*173+37)%w;
+  const y=(i*61+19)%245;
+  ctx.fillStyle="rgba(210,225,255,0.6)";
+  ctx.fillRect(x,y,2,2);
+ }
+
+ // Dark roadside
+ ctx.fillStyle="#0c1717";
+ ctx.fillRect(0,255,w,285);
+
+ const center=w/2-t.lane*155;
+
+ // Highway
+ ctx.beginPath();
+ ctx.moveTo(center-42,255);
+ ctx.lineTo(center+42,255);
+ ctx.lineTo(center+510,540);
+ ctx.lineTo(center-510,540);
+ ctx.closePath();
+ ctx.fillStyle=t.lights?"#343b45":"#171b21";
+ ctx.fill();
+
+ // Road edges
+ ctx.strokeStyle="#e5d5a6";
+ ctx.lineWidth=5;
+ for(const side of [-1,1]){
+  ctx.beginPath();
+  ctx.moveTo(center+side*40,255);
+  ctx.lineTo(center+side*485,540);
+  ctx.stroke();
+ }
+
+ // Moving lane markers and roadside
+ for(let i=0;i<12;i++){
+  const z=(i/12+t.road*0.035)%1;
+  const y=258+z*z*290;
+  const spread=z*z*240;
+  ctx.strokeStyle="#e6ca72";
+  ctx.lineWidth=4+z*5;
+  ctx.beginPath();
+  ctx.moveTo(center,y);
+  ctx.lineTo(center,y+6+z*26);
+  ctx.stroke();
+
+  ctx.fillStyle="#263a32";
+  for(const side of [-1,1]){
+   const x=center+side*(75+spread*2.5);
+   ctx.fillRect(x-8,y-22-z*50,16+z*15,35+z*65);
+  }
+ }
+
+ // Headlight glow
+ if(t.lights){
+  const glow=ctx.createRadialGradient(center,400,20,center,400,450);
+  glow.addColorStop(0,"rgba(255,234,164,0.19)");
+  glow.addColorStop(1,"rgba(255,234,164,0)");
+  ctx.fillStyle=glow;
+  ctx.fillRect(0,255,w,285);
+ }else{
+  ctx.fillStyle="rgba(0,0,0,0.45)";
+  ctx.fillRect(0,180,w,360);
+ }
+
+ // Cab dashboard
+ ctx.fillStyle="#101923";
+ ctx.beginPath();
+ ctx.moveTo(0,460);
+ ctx.quadraticCurveTo(w/2,420,w,460);
+ ctx.lineTo(w,h);
+ ctx.lineTo(0,h);
+ ctx.fill();
+
+ // Steering wheel
+ ctx.strokeStyle="#536c83";
+ ctx.lineWidth=10;
+ ctx.beginPath();
+ ctx.arc(w/2,570,120,Math.PI,Math.PI*2);
+ ctx.stroke();
+
+ ctx.fillStyle="#8dc5cf";
+ ctx.font="bold 23px Arial";
+ ctx.fillText("ROUTE 13",25,45);
+ ctx.font="17px Arial";
+ ctx.fillStyle="#f1e6cf";
+ ctx.fillText("12:47 AM • MIDNIGHT HAUL",25,75);
+
+ if(warning&&!finished){
+  ctx.fillStyle="#f3a6ad";
+  ctx.font="bold 19px Arial";
+  ctx.fillText("CHECK YOUR MIRRORS",w-255,48);
+ }
+
+ if(finished){
+  ctx.fillStyle="rgba(0,0,0,0.75)";
+  ctx.fillRect(0,0,w,h);
+  ctx.textAlign="center";
+  ctx.fillStyle="white";
+  ctx.font="bold 35px Arial";
+  ctx.fillText(t.distance<=0?"DELIVERY COMPLETE":"GAME OVER",w/2,h/2);
+  ctx.font="19px Arial";
+  ctx.fillText("Press RESTART to drive again",w/2,h/2+42);
+  ctx.textAlign="left";
+ }
+}
+
+function loop(timestamp){
+ const dt=Math.min(0.05,(timestamp-last)/1000||0);
+ last=timestamp;
+ update(dt);
+ draw();
+ requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
